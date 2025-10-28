@@ -9,7 +9,7 @@ import {
   EmployeeLoginResponse,
 } from "./types";
 
-const API_BASE = "/api";
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/+$/, "");
 
 export async function fetchStates(): Promise<StateOption[]> {
   const response = await fetch(`${API_BASE}/states`);

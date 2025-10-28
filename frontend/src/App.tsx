@@ -188,10 +188,13 @@ export default function App() {
   const handleChange = (
     event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
-    const { name, value, type, checked } = event.target;
+    const { name, value, type } = event.target;
+    const nextValue = type === "checkbox"
+      ? (event.target as HTMLInputElement).checked
+      : value;
     setForm((prev) => ({
       ...prev,
-      [name]: type === "checkbox" ? checked : value,
+      [name]: nextValue,
     }));
   };
 
