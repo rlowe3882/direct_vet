@@ -9,7 +9,7 @@ The backend reads configuration from environment variables (a `.env` file is pro
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `APP_SECRET_KEY` | Secret used for HMAC-signed tokens; **set a strong value in production** | `change-me-please` |
-| `DATABASE_URL` | SQLAlchemy connection string (SQLite, MySQL, etc.) | `sqlite:///./dev.db` |
+| `DATABASE_URL` | SQLAlchemy connection string (PostgreSQL) | `postgresql+psycopg://directvet:directvet@postgres:5432/directvet` |
 | `DOCUMENT_STORAGE_ROOT` | Directory where uploaded files are persisted | `files` |
 | `EMPLOYEE_ALLOWED_EMAILS` | Comma-separated list of employees allowed to log in | empty (allow all) |
 | `ACCESS_TOKEN_TTL` / `EMPLOYEE_TOKEN_TTL` | Token lifetimes in seconds | `3600` |
@@ -24,7 +24,7 @@ For AWS, place secrets (database credentials, secret keys) in AWS Secrets Manage
    cp backend/.env backend/.env.local
    ```
    (Update `docker-compose.yml` if you want to use the new filename.)
-2. Build the images and start both services:
+2. Build the images and start all services (backend, frontend, PostgreSQL):
    ```bash
    docker compose up --build
    ```
@@ -35,7 +35,7 @@ For AWS, place secrets (database credentials, secret keys) in AWS Secrets Manage
    - Creates database tables.
    - Seeds the states reference data.
    - Proxies requests with `--proxy-headers`, so it works behind reverse proxies.
-5. Uploaded documents are stored under the named Docker volume `backend-documents`; SQLite data is stored in `backend-sqlite`.
+5. Uploaded documents are stored under the named Docker volume `backend-documents`; PostgreSQL data is stored in `postgres-data`.
 
 To stop the stack, press `Ctrl+C` and then run `docker compose down` if you want containers removed.
 
@@ -71,7 +71,7 @@ docker push <account>.dkr.ecr.<region>.amazonaws.com/directvet-frontend:latest
 
 1. **Persistent storage**  
    - Point `DOCUMENT_STORAGE_ROOT` to a persistent volume (Amazon EFS) or adapt the application to use S3 for uploads.
-   - For SQLite, mount `/data` to persistent storage or switch `DATABASE_URL` to an external database (e.g., Amazon RDS MySQL/PostgreSQL).
+   - Configure PostgreSQL with persistent storage (e.g., Amazon RDS or an RDS proxy). Update `DATABASE_URL` to match your database endpoint and credentials.
 2. **Networking**  
    - Frontend container listens on port `80` (Nginx).  
    - Backend container listens on port `8000`.  

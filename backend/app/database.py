@@ -5,7 +5,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./dev.db")
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+psycopg://directvet:directvet@localhost:5432/directvet",
+)
 
 engine = create_engine(
     DATABASE_URL,
@@ -24,4 +27,3 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-
