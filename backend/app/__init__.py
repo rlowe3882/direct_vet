@@ -1,4 +1,3 @@
 """
-Backend package for the PetLabs registration FastAPI application.
+Backend package for the DirectVet client document FastAPI application supporting partners like PetLabs.
 """
-

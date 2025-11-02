@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, constr, validator
@@ -10,6 +10,27 @@ class StateRead(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class ClientAdminSummary(BaseModel):
+    client_id: int
+    email: EmailStr
+    first_name: str
+    last_name: str
+    phone: str
+    hospital_name: str
+    address: str
+    city: str
+    state: str
+    zip: Optional[str]
+    is_employee: bool
+
+
+class EmployeeAccountStatus(BaseModel):
+    client_id: int
+    email: EmailStr
+    is_employee: bool
+    created_at: Optional[datetime] = None
 
 
 class RegistrationCreate(BaseModel):
@@ -65,6 +86,16 @@ class DocumentRead(BaseModel):
     file_name: str
     file_date: date
     is_read: bool
+    download_url: str
+
+
+class ClientDocumentSummary(BaseModel):
+    document_id: int
+    hospital_id: int
+    hospital_name: str
+    file_name: str
+    file_date: date
+    assigned_at: datetime
     download_url: str
 
 

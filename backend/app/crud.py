@@ -147,3 +147,81 @@ def create_document_record(
     db.flush()
     db.refresh(document)
     return document
+
+
+def get_documents_for_client(
+    db: Session, client_id: int
+) -> list[tuple[models.Document, models.Hospital]]:
+    stmt = (
+        select(models.Document, models.Hospital)
+        .join(models.Hospital, models.Hospital.hospital_id == models.Document.hospital_id)
+        .where(
+            models.Hospital.client_id == client_id,
+            models.Hospital.isActive.is_(True),
+        )
+        .order_by(models.Document.create_date.desc())
+    )
+    return db.execute(stmt).all()
+
+
+def get_clients_for_admin(
+    db: Session,
+) -> list[tuple[models.Client, models.Hospital, Optional[models.EmployeeAccount]]]:
+    stmt = (
+        select(models.Client, models.Hospital, models.EmployeeAccount)
+        .join(models.Hospital, models.Hospital.hospital_id == models.Client.hospital_id)
+        .outerjoin(models.EmployeeAccount, models.EmployeeAccount.client_id == models.Client.client_id)
+        .where(models.Client.isActive.is_(True))
+        .order_by(models.Client.lname.asc(), models.Client.fname.asc())
+    )
+    return db.execute(stmt).all()
+
+
+def grant_employee_access(db: Session, client: models.Client) -> models.EmployeeAccount:
+    if client.employee_account:
+        return client.employee_account
+
+    account = models.EmployeeAccount(
+        client_id=client.client_id,
+        email=client.email.lower(),
+    )
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return account
+
+
+def revoke_employee_access(db: Session, client_id: int) -> bool:
+    account = db.get(models.EmployeeAccount, client_id)
+    if not account:
+        return False
+    db.delete(account)
+    db.commit()
+    return True
+
+
+def is_employee_authorized(db: Session, email: str) -> bool:
+    stmt = (
+        select(models.EmployeeAccount.client_id)
+        .join(models.Client, models.Client.client_id == models.EmployeeAccount.client_id)
+        .where(func.lower(models.Client.email) == func.lower(email))
+        .limit(1)
+    )
+    return db.execute(stmt).scalar_one_or_none() is not None
+
+
+def has_employee_accounts(db: Session) -> bool:
+    stmt = select(models.EmployeeAccount.client_id).limit(1)
+    return db.execute(stmt).scalar_one_or_none() is not None
+
+
+def ensure_employee_account_for_email(db: Session, email: str) -> bool:
+    client = find_client_by_email(db, email=email)
+    if not client:
+        return False
+
+    if client.employee_account:
+        return False
+
+    grant_employee_access(db, client)
+    return True

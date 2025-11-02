@@ -7,8 +7,14 @@ import {
   loginEmployee,
   fetchAdminHospitals,
   uploadDocuments,
+  fetchAdminClients,
+  fetchClientDocuments,
+  grantEmployeeAccess,
+  revokeEmployeeAccess,
 } from "./api";
 import type {
+  ClientAdminSummary,
+  ClientDocumentSummary,
   LoginPayload,
   PaymentType,
   RegistrationPayload,
@@ -21,6 +27,7 @@ import type {
 const todayIso = new Date().toISOString().slice(0, 10);
 
 type ViewMode = "register" | "login" | "workspace" | "staff";
+type StaffViewMode = "uploads" | "employees" | "clients" | "documents";
 
 const emptyForm: RegistrationPayload = {
   accept_policy: false,
@@ -83,6 +90,16 @@ export default function App() {
   const [staffIsUploading, setStaffIsUploading] = useState(false);
   const [staffIsLoggingIn, setStaffIsLoggingIn] = useState(false);
   const [staffFileInputKey, setStaffFileInputKey] = useState(0);
+  const [staffViewMode, setStaffViewMode] = useState<StaffViewMode>("uploads");
+  const [adminClients, setAdminClients] = useState<ClientAdminSummary[]>([]);
+  const [adminClientsLoading, setAdminClientsLoading] = useState(false);
+  const [adminClientsError, setAdminClientsError] = useState<string | null>(null);
+  const [employeeActionClientId, setEmployeeActionClientId] = useState<number | null>(null);
+  const [staffSelectedDocClient, setStaffSelectedDocClient] = useState<string>("");
+  const [staffClientDocuments, setStaffClientDocuments] = useState<ClientDocumentSummary[]>([]);
+  const [staffClientDocumentsLoading, setStaffClientDocumentsLoading] = useState(false);
+  const [staffClientDocumentsError, setStaffClientDocumentsError] = useState<string | null>(null);
+  const [staffClientDocumentsClientId, setStaffClientDocumentsClientId] = useState<number | null>(null);
 
   const resetClientSession = (message?: string) => {
     setAuthToken(null);
@@ -108,6 +125,16 @@ export default function App() {
     setStaffUploadedDocs([]);
     setStaffIsUploading(false);
     setStaffHospitalsLoading(false);
+    setStaffViewMode("uploads");
+    setStaffSelectedDocClient("");
+    setStaffClientDocuments([]);
+    setStaffClientDocumentsError(null);
+    setStaffClientDocumentsLoading(false);
+    setStaffClientDocumentsClientId(null);
+    setAdminClients([]);
+    setAdminClientsError(null);
+    setAdminClientsLoading(false);
+    setEmployeeActionClientId(null);
   };
 
   useEffect(() => {
@@ -270,11 +297,124 @@ export default function App() {
     }
   };
 
+  const loadAdminClients = async (token: string) => {
+    setAdminClientsLoading(true);
+    setAdminClientsError(null);
+    try {
+      const clients = await fetchAdminClients(token);
+      setAdminClients(clients);
+      if (staffViewMode === "documents" && staffSelectedDocClient) {
+        const selectedId = Number(staffSelectedDocClient);
+        if (!Number.isNaN(selectedId) && selectedId > 0) {
+          void loadClientDocuments(token, selectedId);
+        }
+      }
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status === 401 || status === 403) {
+        handleStaffLogout("Session expired. Please log in again.");
+        return;
+      }
+      if (error instanceof Error) {
+        setAdminClientsError(error.message);
+      } else {
+        setAdminClientsError("Unable to load clients.");
+      }
+    } finally {
+      setAdminClientsLoading(false);
+    }
+  };
+
+  const loadClientDocuments = async (token: string, clientId: number) => {
+    setStaffClientDocumentsLoading(true);
+    setStaffClientDocumentsError(null);
+    setStaffClientDocuments([]);
+    try {
+      const documents = await fetchClientDocuments(token, clientId);
+      setStaffClientDocuments(documents);
+      setStaffClientDocumentsClientId(clientId);
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status === 401 || status === 403) {
+        handleStaffLogout("Session expired. Please log in again.");
+        return;
+      }
+      if (error instanceof Error) {
+        setStaffClientDocumentsError(error.message);
+      } else {
+        setStaffClientDocumentsError("Unable to load documents.");
+      }
+      setStaffClientDocumentsClientId(null);
+    } finally {
+      setStaffClientDocumentsLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (viewMode === "staff" && staffToken && !staffHospitalsLoading && staffHospitals.length === 0) {
       void loadStaffHospitals(staffToken);
     }
   }, [viewMode, staffToken, staffHospitalsLoading, staffHospitals.length]);
+
+  useEffect(() => {
+    if (
+      viewMode === "staff" &&
+      staffToken &&
+      staffViewMode !== "uploads" &&
+      !adminClientsLoading &&
+      adminClients.length === 0
+    ) {
+      void loadAdminClients(staffToken);
+    }
+  }, [viewMode, staffToken, staffViewMode, adminClientsLoading, adminClients.length]);
+
+  useEffect(() => {
+    if (staffViewMode !== "documents") {
+      return;
+    }
+    if (viewMode !== "staff") {
+      return;
+    }
+    if (adminClients.length === 0) {
+      if (staffSelectedDocClient) {
+        setStaffSelectedDocClient("");
+      }
+      return;
+    }
+    const selectedExists = adminClients.some(
+      (client) => String(client.client_id) === staffSelectedDocClient,
+    );
+    if (!selectedExists) {
+      setStaffSelectedDocClient(String(adminClients[0].client_id));
+    }
+  }, [viewMode, staffViewMode, adminClients, staffSelectedDocClient]);
+
+  useEffect(() => {
+    if (staffViewMode !== "documents" && staffClientDocumentsClientId !== null) {
+      setStaffClientDocumentsClientId(null);
+      setStaffClientDocuments([]);
+    }
+  }, [staffViewMode, staffClientDocumentsClientId]);
+
+  useEffect(() => {
+    if (
+      viewMode === "staff" &&
+      staffViewMode === "documents" &&
+      staffToken &&
+      staffSelectedDocClient
+    ) {
+      const clientId = Number(staffSelectedDocClient);
+      if (!Number.isNaN(clientId) && clientId > 0 && clientId !== staffClientDocumentsClientId) {
+        void loadClientDocuments(staffToken, clientId);
+      }
+    }
+  }, [
+    viewMode,
+    staffViewMode,
+    staffToken,
+    staffSelectedDocClient,
+    staffClientDocumentsClientId,
+  ]);
 
   const resetForm = () => {
     setForm({
@@ -287,6 +427,9 @@ export default function App() {
   };
 
   const handleViewChange = (mode: ViewMode) => {
+    if (mode === "staff") {
+      setStaffViewMode("uploads");
+    }
     if (mode !== viewMode) {
       setViewMode(mode);
     }
@@ -336,6 +479,9 @@ export default function App() {
     setStaffToken(null);
     setStaffName(null);
     setStaffIsLoggingIn(true);
+    setStaffViewMode("uploads");
+    setAdminClients([]);
+    setAdminClientsError(null);
 
     try {
       const response = await loginEmployee({
@@ -374,6 +520,82 @@ export default function App() {
 
   const removeStaffFile = (index: number) => {
     setStaffFiles((prev) => prev.filter((_, fileIndex) => fileIndex !== index));
+  };
+
+  const handleClientDocumentsSelect = (event: ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    setStaffSelectedDocClient(value);
+    setStaffClientDocumentsError(null);
+    if (!value) {
+      setStaffClientDocuments([]);
+      setStaffClientDocumentsClientId(null);
+    }
+  };
+
+  const handleStaffViewSwitch = (mode: StaffViewMode) => {
+    setStaffViewMode(mode);
+    setAdminClientsError(null);
+    if (mode !== "documents") {
+      setStaffClientDocumentsError(null);
+    }
+    if (
+      mode !== "uploads" &&
+      staffToken &&
+      adminClients.length === 0 &&
+      !adminClientsLoading
+    ) {
+      void loadAdminClients(staffToken);
+    }
+  };
+
+  const handleEmployeeAccessChange = async (clientId: number, enable: boolean) => {
+    if (!staffToken) {
+      setAdminClientsError("Please log in first.");
+      return;
+    }
+
+    setEmployeeActionClientId(clientId);
+    setAdminClientsError(null);
+
+    try {
+      const response = enable
+        ? await grantEmployeeAccess(staffToken, clientId)
+        : await revokeEmployeeAccess(staffToken, clientId);
+
+      setAdminClients((prev) =>
+        prev.map((client) =>
+          client.client_id === clientId
+            ? {
+                ...client,
+                is_employee: response.is_employee,
+              }
+            : client,
+        ),
+      );
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status === 401 || status === 403) {
+        handleStaffLogout("Session expired. Please log in again.");
+        return;
+      }
+      const message =
+        error instanceof Error
+          ? error.message
+          : enable
+            ? "Unable to grant employee access."
+            : "Unable to revoke employee access.";
+      setAdminClientsError(message);
+    } finally {
+      setEmployeeActionClientId(null);
+    }
+  };
+
+  const handleAdminClientsRefresh = () => {
+    if (!staffToken) {
+      setAdminClientsError("Please log in first.");
+      return;
+    }
+    void loadAdminClients(staffToken);
   };
 
   const handleStaffUploadSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -452,53 +674,55 @@ export default function App() {
     switch (viewMode) {
       case "register":
         return {
-          eyebrow: "Client Services",
-          title: "PetLabs Diagnostics Registration",
+          eyebrow: "DirectVet Platform",
+          title: "DirectVet Laboratory Client Onboarding",
           subtitle:
-            "Seamlessly onboard your practice, set up recurring payments, and gain secure access to lab records in one modern workflow.",
-          badgeLabel: "Trusted Partner",
-          badgeValue: "Since 2016",
+            "Bring PetLabs and every veterinary partner into a centralized workflow for requisitions, billing, and shared documents.",
+          badgeLabel: "Document Hub",
+          badgeValue: "Built for Labs",
         };
       case "login":
         return {
-          eyebrow: "Client Portal",
-          title: "Secure Login to PetLabs",
+          eyebrow: "DirectVet Portal",
+          title: "Secure Login to DirectVet",
           subtitle:
-            "Sign in to review lab results, manage requisitions, and stay connected with the diagnostics team in real time.",
-          badgeLabel: "Security First",
-          badgeValue: "24/7 Access",
+            "Access laboratory client documents, requisitions, and diagnostics updates in one secure hub.",
+          badgeLabel: "Trusted by Labs",
+          badgeValue: "Including PetLabs",
         };
       case "workspace": {
         const locationCount = hospitals.length;
         return {
-          eyebrow: "Client Workspace",
+          eyebrow: "DirectVet Workspace",
           title: workspaceData
             ? `Welcome back, ${workspaceData.client_name}`
-            : "PetLabs Client Workspace",
+            : "DirectVet Client Workspace",
           subtitle: locationCount
-            ? "Select a location to review lab documents, requisitions, and updates."
-            : "Add a practice location or contact support to get started.",
-          badgeLabel: "Active Locations",
-          badgeValue: locationCount ? `${locationCount} ${locationCount === 1 ? "Location" : "Locations"}` : "Getting Started",
+            ? "Select a client site to review diagnostics documents, requisitions, and compliance updates."
+            : "Add your first client or contact DirectVet support to get started.",
+          badgeLabel: "Client Locations",
+          badgeValue: locationCount
+            ? `${locationCount} ${locationCount === 1 ? "Location" : "Locations"}`
+            : "PetLabs onboarding",
         };
       }
       case "staff": {
         const locationCount = staffHospitals.length;
         return {
-          eyebrow: "Staff Workspace",
-          title: staffName ? `Hello, ${staffName}` : "PetLabs Staff Uploads",
+          eyebrow: "DirectVet Operations",
+          title: staffName ? `Hello, ${staffName}` : "DirectVet Staff Uploads",
           subtitle: locationCount
-            ? "Select a hospital to upload new requisitions, reports, or announcements."
-            : "Authenticate to access client hospitals and manage their documents.",
+            ? "Select a laboratory client to upload new requisitions, reports, or announcements."
+            : "Authenticate to access client hospitals like PetLabs and manage their documents.",
           badgeLabel: "Hospitals",
           badgeValue: locationCount ? `${locationCount} available` : "Awaiting login",
         };
       }
       default:
         return {
-          eyebrow: "PetLabs Diagnostics",
+          eyebrow: "DirectVet Platform",
           title: "Client Portal",
-          subtitle: "Access the tools you need to run your practice efficiently.",
+          subtitle: "Manage diagnostics documents, requisitions, and communications for every client from one hub.",
           badgeLabel: "Diagnostics Partner",
           badgeValue: "Always On",
         };
@@ -507,6 +731,9 @@ export default function App() {
 
   const viewButtonClass = (mode: ViewMode) =>
     mode === viewMode ? "view-toggle__button view-toggle__button--active" : "view-toggle__button";
+
+  const staffViewButtonClass = (mode: StaffViewMode) =>
+    staffViewMode === mode ? "view-toggle__button view-toggle__button--active" : "view-toggle__button";
 
   const isLoginDisabled =
     loginForm.email.trim() === "" || loginForm.password.trim().length < 6 || isLoggingIn;
@@ -521,6 +748,47 @@ export default function App() {
   const staffRequiresRequisition = staffSelectedHospitalOption
     ? REQUISITION_REQUIRED_IDS.has(staffSelectedHospitalOption.hospital_id)
     : false;
+
+  const allowedEmployeeClients = useMemo(
+    () => adminClients.filter((client) => client.is_employee),
+    [adminClients],
+  );
+
+  const showAccessActions = staffViewMode === "employees";
+
+  const staffHeaderCopy = useMemo(() => {
+    switch (staffViewMode) {
+      case "uploads":
+        return {
+          title: "Upload documents for clients",
+          description:
+            "Select a hospital and upload the files that should appear in the client workspace.",
+        };
+      case "employees":
+        return {
+          title: "Manage employee access",
+          description:
+            "Review client registrations and control which email accounts can sign in as employees.",
+        };
+      case "clients":
+        return {
+          title: "Client list",
+          description: "Browse client registrations with full contact details.",
+        };
+      case "documents":
+        return {
+          title: "Client documents",
+          description:
+            "Choose a client to review documents assigned to their hospitals and open each file without leaving this view.",
+        };
+      default:
+        return {
+          title: "Upload documents for clients",
+          description:
+            "Select a hospital and upload the files that should appear in the client workspace.",
+        };
+    }
+  }, [staffViewMode]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -558,6 +826,14 @@ export default function App() {
       return value;
     }
     return parsed.toLocaleDateString();
+  };
+
+  const formatAssignedDate = (value: string) => {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleString();
   };
 
   return (
@@ -606,7 +882,7 @@ export default function App() {
           <div className="workspace-toolbar" role="region" aria-label="Workspace actions">
             <div className="workspace-toolbar__meta">
               <span>Signed in as&nbsp;</span>
-              <strong>{workspaceData?.client_name ?? "PetLabs Client"}</strong>
+              <strong>{workspaceData?.client_name ?? "PetLabs Diagnostics"}</strong>
             </div>
             <div className="workspace-toolbar__actions">
               <button type="button" className="link-button" onClick={() => resetClientSession()}>
@@ -646,8 +922,8 @@ export default function App() {
                       onChange={handleChange}
                     />
                     <span>
-                      I have read and understand the PetLabs Diagnostic Laboratories Inc.
-                      Credit Policy.
+                      I have read and understand the DirectVet Laboratory Services Credit
+                      Policy.
                     </span>
                   </label>
                   {!form.accept_policy && (
@@ -940,19 +1216,19 @@ export default function App() {
             </section>
 
             <aside className="insight-card">
-              <h2>Why partner with PetLabs</h2>
+              <h2>Why laboratories choose DirectVet</h2>
               <ul className="insight-list">
                 <li>
-                  <strong>Dedicated onboarding.</strong> A diagnostics specialist guides every
-                  new partner through the first 30 days.
+                  <strong>Dedicated onboarding.</strong> A DirectVet specialist guides every
+                  new partner—PetLabs included—through the first 30 days.
                 </li>
                 <li>
-                  <strong>Real-time reporting.</strong> Access finalized results the moment
-                  they are released in the portal.
+                  <strong>Centralized document control.</strong> Store requisitions, reports,
+                  and compliance files for each client in one portal.
                 </li>
                 <li>
-                  <strong>Flexible billing.</strong> Choose the payment cadence and contact
-                  preferences that keep your practice organized.
+                  <strong>Flexible billing.</strong> Choose the cadence and contact preferences
+                  that keep your laboratory operations organized.
                 </li>
               </ul>
               <div className="insight-cta">
@@ -976,7 +1252,10 @@ export default function App() {
                   <legend>Account Login</legend>
                   <div className="section-intro">
                     <h3 className="section-title">Welcome back</h3>
-                    <p>Use the email associated with your PetLabs account to sign in.</p>
+                    <p>
+                      Use the email associated with your DirectVet account to sign in. PetLabs
+                      team members can log in with their DirectVet-issued credentials.
+                    </p>
                   </div>
                   <div className="grid">
                     <label>
@@ -1013,7 +1292,7 @@ export default function App() {
                     >
                       Need an account? Start registration
                     </button>
-                    <a className="link-button" href="mailto:info@petlabsdiagnostics.com">
+                    <a className="link-button" href="mailto:support@directvet.com">
                       Forgot password? Contact support
                     </a>
                   </div>
@@ -1058,8 +1337,8 @@ export default function App() {
             {staffToken ? (
               <section className="staff-card">
                 <div className="staff-card__header">
-                  <h2>Upload documents for clients</h2>
-                  <p>Select a hospital and upload the files that should appear in the client workspace.</p>
+                  <h2>{staffHeaderCopy.title}</h2>
+                  <p>{staffHeaderCopy.description}</p>
                   <div className="staff-card__meta">
                     <span>{staffName ? `Signed in as ${staffName}` : "Staff session"}</span>
                     <button type="button" className="link-button" onClick={() => handleStaffLogout()}>
@@ -1067,98 +1346,318 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-                <form onSubmit={handleStaffUploadSubmit} className="staff-form" noValidate>
-                  {staffHospitalsLoading && <div className="banner banner--info">Loading hospitals…</div>}
-                  <label>
-                    Hospital
-                    <select
-                      name="staff_hospital"
-                      value={staffSelectedHospital}
-                      onChange={handleStaffHospitalChange}
-                      disabled={staffHospitalsLoading}
-                      required
-                    >
-                      <option value="">Select hospital</option>
-                      {staffHospitals.map((hospital) => (
-                        <option key={hospital.hospital_id} value={hospital.hospital_id}>
-                          {hospital.hospital_name}
-                          {hospital.state ? ` (${hospital.state})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                    {!staffHospitalsLoading && staffHospitals.length === 0 && (
-                      <span className="help-text">No active hospitals available.</span>
-                    )}
-                  </label>
 
-                  <label>
-                    Requisition number
-                    <input
-                      type="text"
-                      name="staff_requisition"
-                      value={staffRequisitionNumber}
-                      onChange={handleStaffRequisitionChange}
-                      placeholder="Required for select hospitals"
-                      className={staffRequiresRequisition ? "required" : ""}
-                      required={staffRequiresRequisition}
-                    />
-                    {staffRequiresRequisition ? (
-                      <span className="help-text">This hospital requires a requisition number (e.g., US12345-DR678).</span>
+                <nav className="view-toggle staff-card__switch" aria-label="Staff tools">
+                  <button
+                    type="button"
+                    className={staffViewButtonClass("uploads")}
+                    onClick={() => handleStaffViewSwitch("uploads")}
+                    aria-pressed={staffViewMode === "uploads"}
+                  >
+                    Document uploads
+                  </button>
+                  <button
+                    type="button"
+                    className={staffViewButtonClass("employees")}
+                    onClick={() => handleStaffViewSwitch("employees")}
+                    aria-pressed={staffViewMode === "employees"}
+                  >
+                    Employee access
+                  </button>
+                  <button
+                    type="button"
+                    className={staffViewButtonClass("clients")}
+                    onClick={() => handleStaffViewSwitch("clients")}
+                    aria-pressed={staffViewMode === "clients"}
+                  >
+                    Client list
+                  </button>
+                  <button
+                    type="button"
+                    className={staffViewButtonClass("documents")}
+                    onClick={() => handleStaffViewSwitch("documents")}
+                    aria-pressed={staffViewMode === "documents"}
+                  >
+                    Client documents
+                  </button>
+                </nav>
+
+                {staffViewMode === "uploads" ? (
+                  <>
+                    <form onSubmit={handleStaffUploadSubmit} className="staff-form" noValidate>
+                      {staffHospitalsLoading && <div className="banner banner--info">Loading hospitals…</div>}
+                      <label>
+                        Hospital
+                        <select
+                          name="staff_hospital"
+                          value={staffSelectedHospital}
+                          onChange={handleStaffHospitalChange}
+                          disabled={staffHospitalsLoading}
+                          required
+                        >
+                          <option value="">Select hospital</option>
+                          {staffHospitals.map((hospital) => (
+                            <option key={hospital.hospital_id} value={hospital.hospital_id}>
+                              {hospital.hospital_name}
+                              {hospital.state ? ` (${hospital.state})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {!staffHospitalsLoading && staffHospitals.length === 0 && (
+                          <span className="help-text">No active hospitals available.</span>
+                        )}
+                      </label>
+
+                      <label>
+                        Requisition number
+                        <input
+                          type="text"
+                          name="staff_requisition"
+                          value={staffRequisitionNumber}
+                          onChange={handleStaffRequisitionChange}
+                          placeholder="Required for select hospitals"
+                          className={staffRequiresRequisition ? "required" : ""}
+                          required={staffRequiresRequisition}
+                        />
+                        {staffRequiresRequisition ? (
+                          <span className="help-text">This hospital requires a requisition number (e.g., US12345-DR678).</span>
+                        ) : (
+                          <span className="help-text">Optional unless specified by the hospital.</span>
+                        )}
+                      </label>
+
+                      <label className="staff-file-picker">
+                        Documents
+                        <input key={staffFileInputKey} type="file" multiple onChange={handleStaffFileChange} />
+                        <span className="help-text">Accepted: PDF, DOC, DOCX, TXT, XLS, XLSX, RTF · Max 2 MB per file.</span>
+                      </label>
+
+                      {staffFiles.length > 0 && (
+                        <ul className="file-list">
+                          {staffFiles.map((file, index) => (
+                            <li key={`${file.name}-${index}`}>
+                              <span>{file.name}</span>
+                              <button type="button" onClick={() => removeStaffFile(index)}>
+                                Remove
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                      {staffError && <div className="banner banner--error">{staffError}</div>}
+                      {staffUploadMessage && <div className="banner banner--success">{staffUploadMessage}</div>}
+
+                      <div className="actions">
+                        <button type="submit" disabled={staffIsUploading}>
+                          {staffIsUploading ? "Uploading..." : "Upload documents"}
+                        </button>
+                      </div>
+                    </form>
+
+                    {staffUploadedDocs.length > 0 && (
+                      <div className="staff-results">
+                        <h3>Recent uploads</h3>
+                        <ul>
+                          {staffUploadedDocs.map((doc) => {
+                            const downloadHref = staffToken
+                              ? `${doc.download_url}?token=${encodeURIComponent(staffToken)}`
+                              : doc.download_url;
+                            return (
+                              <li key={doc.id}>
+                                <span>{doc.file_name}</span>
+                                <div className="staff-results__actions">
+                                  <span>{formatDocumentDate(doc.file_date)}</span>
+                                  <a href={downloadHref} download={doc.file_name}>
+                                    Download
+                                  </a>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                ) : staffViewMode === "documents" ? (
+                  <div className="staff-documents">
+                    <div className="staff-documents__controls">
+                      <label>
+                        Client
+                        <select
+                          name="staff_document_client"
+                          value={staffSelectedDocClient}
+                          onChange={handleClientDocumentsSelect}
+                          disabled={adminClientsLoading || adminClients.length === 0}
+                        >
+                          <option value="">Select client</option>
+                          {adminClients.map((client) => (
+                            <option key={client.client_id} value={client.client_id}>
+                              {client.hospital_name} · {client.first_name} {client.last_name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    {adminClientsError && <div className="banner banner--error">{adminClientsError}</div>}
+                    {staffClientDocumentsError && (
+                      <div className="banner banner--error">{staffClientDocumentsError}</div>
+                    )}
+                    {adminClientsLoading && adminClients.length === 0 ? (
+                      <div className="staff-admin__empty">Loading clients…</div>
+                    ) : adminClients.length === 0 ? (
+                      <div className="staff-admin__empty">No clients available yet.</div>
+                    ) : !staffSelectedDocClient ? (
+                      <div className="staff-admin__empty">Select a client to view documents.</div>
+                    ) : staffClientDocumentsLoading ? (
+                      <div className="staff-admin__empty">Loading documents…</div>
+                    ) : staffClientDocuments.length === 0 ? (
+                      <div className="staff-admin__empty">No documents available for this client.</div>
                     ) : (
-                      <span className="help-text">Optional unless specified by the hospital.</span>
+                      <div className="staff-admin__grid">
+                        <section className="staff-admin__clients">
+                          <h3>Documents for selected client</h3>
+                          <table className="workspace-table">
+                            <thead>
+                              <tr>
+                                <th>Document</th>
+                                <th>Hospital</th>
+                                <th>File date</th>
+                                <th>Assigned</th>
+                                <th>Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {staffClientDocuments.map((document) => {
+                                const downloadHref = staffToken
+                                  ? `${document.download_url}?token=${encodeURIComponent(staffToken)}`
+                                  : document.download_url;
+                                return (
+                                  <tr key={document.document_id}>
+                                    <td>{document.file_name}</td>
+                                    <td>{document.hospital_name}</td>
+                                    <td>{formatDocumentDate(document.file_date)}</td>
+                                    <td>{formatAssignedDate(document.assigned_at)}</td>
+                                    <td>
+                                      <a className="primary-link primary-link--inline" href={downloadHref}>
+                                        View
+                                      </a>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </section>
+                      </div>
                     )}
-                  </label>
-
-                  <label className="staff-file-picker">
-                    Documents
-                    <input key={staffFileInputKey} type="file" multiple onChange={handleStaffFileChange} />
-                    <span className="help-text">Accepted: PDF, DOC, DOCX, TXT, XLS, XLSX, RTF · Max 2 MB per file.</span>
-                  </label>
-
-                  {staffFiles.length > 0 && (
-                    <ul className="file-list">
-                      {staffFiles.map((file, index) => (
-                        <li key={`${file.name}-${index}`}>
-                          <span>{file.name}</span>
-                          <button type="button" onClick={() => removeStaffFile(index)}>
-                            Remove
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  {staffError && <div className="banner banner--error">{staffError}</div>}
-                  {staffUploadMessage && <div className="banner banner--success">{staffUploadMessage}</div>}
-
-                  <div className="actions">
-                    <button type="submit" disabled={staffIsUploading}>
-                      {staffIsUploading ? "Uploading..." : "Upload documents"}
-                    </button>
                   </div>
-                </form>
-
-                {staffUploadedDocs.length > 0 && (
-                  <div className="staff-results">
-                    <h3>Recent uploads</h3>
-                    <ul>
-                      {staffUploadedDocs.map((doc) => {
-                        const downloadHref = staffToken
-                          ? `${doc.download_url}?token=${encodeURIComponent(staffToken)}`
-                          : doc.download_url;
-                        return (
-                          <li key={doc.id}>
-                            <span>{doc.file_name}</span>
-                            <div className="staff-results__actions">
-                              <span>{formatDocumentDate(doc.file_date)}</span>
-                              <a href={downloadHref} download={doc.file_name}>
-                                Download
-                              </a>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                ) : (
+                  <div className="staff-admin">
+                    <div className="staff-admin__toolbar">
+                      <button
+                        type="button"
+                        onClick={handleAdminClientsRefresh}
+                        disabled={adminClientsLoading}
+                      >
+                        {adminClientsLoading ? "Refreshing..." : "Refresh list"}
+                      </button>
+                    </div>
+                    {adminClientsError && <div className="banner banner--error">{adminClientsError}</div>}
+                    {adminClientsLoading && adminClients.length === 0 ? (
+                      <div className="staff-admin__empty">Loading clients…</div>
+                    ) : adminClients.length === 0 ? (
+                      <div className="staff-admin__empty">No clients available yet.</div>
+                    ) : (
+                      <div className="staff-admin__grid">
+                        <section className="staff-admin__clients">
+                          <h3>{showAccessActions ? "Client registrations" : "Client list"}</h3>
+                          <table className="workspace-table">
+                            <thead>
+                              <tr>
+                                <th>Practice</th>
+                                <th>Primary contact</th>
+                                <th>Phone</th>
+                                <th>{showAccessActions ? "Employee access" : "Employee status"}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {adminClients.map((client) => {
+                                const isPending = employeeActionClientId === client.client_id;
+                                const addressLine = `${client.address}, ${client.city}, ${client.state}${
+                                  client.zip ? ` ${client.zip}` : ""
+                                }`;
+                                return (
+                                  <tr key={client.client_id}>
+                                    <td>
+                                      <strong>{client.hospital_name}</strong>
+                                      <div className="staff-admin__detail">{addressLine}</div>
+                                    </td>
+                                    <td>
+                                      <div>{`${client.first_name} ${client.last_name}`}</div>
+                                      <div className="staff-admin__detail">{client.email}</div>
+                                    </td>
+                                    <td>
+                                      <div className="staff-admin__detail">{client.phone}</div>
+                                    </td>
+                                    <td>
+                                      {showAccessActions ? (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleEmployeeAccessChange(client.client_id, !client.is_employee)
+                                          }
+                                          disabled={isPending}
+                                        >
+                                          {isPending
+                                            ? "Saving..."
+                                            : client.is_employee
+                                              ? "Revoke access"
+                                              : "Allow access"}
+                                        </button>
+                                      ) : (
+                                        <span className="staff-admin__detail">
+                                          {client.is_employee ? "Access enabled" : "Not enabled"}
+                                        </span>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </section>
+                        {showAccessActions && (
+                          <aside className="staff-admin__summary">
+                            <h3>Allowed employee accounts</h3>
+                            {allowedEmployeeClients.length === 0 ? (
+                              <p>No employee accounts currently have access.</p>
+                            ) : (
+                              <ul>
+                                {allowedEmployeeClients.map((client) => {
+                                  const isPending = employeeActionClientId === client.client_id;
+                                  return (
+                                    <li key={client.client_id}>
+                                      <strong>{client.email}</strong>
+                                      <div className="staff-admin__detail">
+                                        {client.first_name} {client.last_name} · {client.hospital_name}
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEmployeeAccessChange(client.client_id, false)}
+                                        disabled={isPending}
+                                      >
+                                        {isPending ? "Removing..." : "Remove access"}
+                                      </button>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                          </aside>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </section>

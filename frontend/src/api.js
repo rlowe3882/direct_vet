@@ -104,3 +104,65 @@ export async function uploadDocuments(token, payload) {
     }
     return response.json();
 }
+export async function fetchAdminClients(token) {
+    const response = await fetch(`${API_BASE}/admin/clients`, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    });
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        const message = (errorBody && errorBody.detail) || "Unable to load clients.";
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+    }
+    return response.json();
+}
+export async function fetchClientDocuments(token, clientId) {
+    const response = await fetch(`${API_BASE}/admin/clients/${clientId}/documents`, {
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    });
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        const message = (errorBody && errorBody.detail) || "Unable to load client documents.";
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+    }
+    return response.json();
+}
+export async function grantEmployeeAccess(token, clientId) {
+    const response = await fetch(`${API_BASE}/admin/clients/${clientId}/employee`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    });
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        const message = (errorBody && errorBody.detail) || "Unable to grant employee access.";
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+    }
+    return response.json();
+}
+export async function revokeEmployeeAccess(token, clientId) {
+    const response = await fetch(`${API_BASE}/admin/clients/${clientId}/employee`, {
+        method: "DELETE",
+        headers: {
+            Authorization: `Bearer ${token}`,
+        },
+    });
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        const message = (errorBody && errorBody.detail) || "Unable to revoke employee access.";
+        const error = new Error(message);
+        error.status = response.status;
+        throw error;
+    }
+    return response.json();
+}

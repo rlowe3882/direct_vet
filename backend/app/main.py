@@ -1,6 +1,6 @@
 import os
 import re
-from datetime import date as dt_date
+from datetime import date as dt_date, datetime as dt_datetime, time as dt_time
 from pathlib import Path
 from typing import Optional
 
@@ -9,15 +9,19 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from . import crud, models, schemas, security
-from .database import Base, engine, get_db
+from .database import Base, SessionLocal, engine, get_db
+from .seed_states import seed_states
 
 
-app = FastAPI(title="PetLabs Diagnostics Registration API")
+app = FastAPI(
+    title="DirectVet Client Document API",
+    description="Laboratory platform for managing client documents for partners such as PetLabs.",
+)
 
 DOCUMENT_STORAGE_ROOT = Path(os.getenv("DOCUMENT_STORAGE_ROOT", "files")).resolve()
 DOCUMENT_STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
 
-EMPLOYEE_ALLOWED_EMAILS = {
+INITIAL_EMPLOYEE_ALLOWED_EMAILS = {
     email.strip().lower()
     for email in os.getenv("EMPLOYEE_ALLOWED_EMAILS", "").split(",")
     if email.strip()
@@ -44,6 +48,10 @@ HOSPITALS_REQUIRE_REQUISITION = {
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
+    inserted, updated = seed_states()
+    if inserted or updated:
+        print(f"[startup] Seeded states: {inserted} inserted, {updated} updated.")
+    _sync_initial_employee_accounts()
 
 
 def _resolve_client(
@@ -66,10 +74,23 @@ def _resolve_client(
     return client
 
 
-def _is_employee_authorized(email: str) -> bool:
-    if not EMPLOYEE_ALLOWED_EMAILS:
+def _sync_initial_employee_accounts() -> None:
+    if not INITIAL_EMPLOYEE_ALLOWED_EMAILS:
+        return
+
+    with SessionLocal() as db:
+        created = 0
+        for email in INITIAL_EMPLOYEE_ALLOWED_EMAILS:
+            if crud.ensure_employee_account_for_email(db, email=email):
+                created += 1
+        if created:
+            print(f"[startup] Added {created} employee account(s) from EMPLOYEE_ALLOWED_EMAILS.")
+
+
+def _is_employee_authorized(db: Session, email: str) -> bool:
+    if not crud.has_employee_accounts(db):
         return True
-    return email.lower() in EMPLOYEE_ALLOWED_EMAILS
+    return crud.is_employee_authorized(db, email=email)
 
 
 def _resolve_employee(
@@ -86,20 +107,25 @@ def _resolve_employee(
     except security.InvalidTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
-    if not _is_employee_authorized(email):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized employee account.")
-
-    # Ensure the employee exists as a client for metadata (name, etc.) if available.
     client = crud.find_client_by_email(db, email=email)
     if not client:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee account not found.")
 
-    return email
+    if not _is_employee_authorized(db, client.email):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized employee account.")
+
+    return client.email
 
 
 @app.get("/states", response_model=list[schemas.StateRead])
 def list_states(db: Session = Depends(get_db)):
-    return crud.get_states(db)
+    states = crud.get_states(db)
+    if not states:
+        inserted, updated = seed_states(db)
+        if inserted or updated:
+            db.expire_all()
+            states = crud.get_states(db)
+    return states
 
 
 @app.post(
@@ -177,7 +203,7 @@ def employee_login(payload: schemas.EmployeeLoginRequest, db: Session = Depends(
             detail="Invalid email or password.",
         )
 
-    if not _is_employee_authorized(client.email):
+    if not _is_employee_authorized(db, client.email):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Unauthorized employee account.",
@@ -233,6 +259,105 @@ def get_workspace(
     return schemas.WorkspaceResponse(
         client_name=f"{client.fname} {client.lname}".strip() or client.email,
         hospitals=hospital_payloads,
+    )
+
+
+@app.get("/admin/clients", response_model=list[schemas.ClientAdminSummary])
+def list_admin_clients(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    _resolve_employee(authorization, token, db)
+    rows = crud.get_clients_for_admin(db)
+    return [
+        schemas.ClientAdminSummary(
+            client_id=client.client_id,
+            email=client.email,
+            first_name=client.fname,
+            last_name=client.lname,
+            phone=client.phone,
+            hospital_name=hospital.hospital_name,
+            address=hospital.address,
+            city=hospital.city,
+            state=hospital.state,
+            zip=hospital.zip,
+            is_employee=employee_account is not None,
+        )
+        for client, hospital, employee_account in rows
+    ]
+
+
+@app.get("/admin/clients/{client_id}/documents", response_model=list[schemas.ClientDocumentSummary])
+def list_client_documents(
+    client_id: int,
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    _resolve_employee(authorization, token, db)
+    client = db.get(models.Client, client_id)
+    if not client or not client.isActive:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found.")
+
+    rows = crud.get_documents_for_client(db, client_id)
+    summaries: list[schemas.ClientDocumentSummary] = []
+    for document, hospital in rows:
+        file_date = document.file_date or (document.create_date.date() if document.create_date else dt_date.today())
+        assigned_at = document.create_date or dt_datetime.combine(file_date, dt_time())
+        summaries.append(
+            schemas.ClientDocumentSummary(
+                document_id=document.id,
+                hospital_id=hospital.hospital_id,
+                hospital_name=hospital.hospital_name,
+                file_name=document.file_name,
+                file_date=file_date,
+                assigned_at=assigned_at,
+                download_url=f"/api/documents/{document.id}",
+            )
+        )
+    return summaries
+
+
+@app.post("/admin/clients/{client_id}/employee", response_model=schemas.EmployeeAccountStatus)
+def grant_employee_account(
+    client_id: int,
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    _resolve_employee(authorization, token, db)
+    client = db.get(models.Client, client_id)
+    if not client or not client.isActive:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found.")
+
+    account = crud.grant_employee_access(db, client)
+    return schemas.EmployeeAccountStatus(
+        client_id=client.client_id,
+        email=client.email,
+        is_employee=True,
+        created_at=account.created_at,
+    )
+
+
+@app.delete("/admin/clients/{client_id}/employee", response_model=schemas.EmployeeAccountStatus)
+def revoke_employee_account(
+    client_id: int,
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    _resolve_employee(authorization, token, db)
+    client = db.get(models.Client, client_id)
+    if not client or not client.isActive:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found.")
+
+    crud.revoke_employee_access(db, client_id)
+    return schemas.EmployeeAccountStatus(
+        client_id=client.client_id,
+        email=client.email,
+        is_employee=False,
+        created_at=None,
     )
 
 

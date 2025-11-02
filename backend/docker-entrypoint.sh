@@ -75,7 +75,7 @@ bootstrap_database() {
 # 1. Check for a special command argument.
 # This handles the call from the new 'migrations' service in docker-compose.yml.
 # If the argument is 'bootstrap_database', we run the setup and immediately exit.
-if [ "$1" = "bootstrap_database" ]; then
+if [[ "${1:-}" == "bootstrap_database" ]]; then
   # If running as root, switch user to run the bootstrap, then exit.
   if [ "$(id -u)" -eq 0 ] && id -u "${APP_USER}" >/dev/null 2>&1; then
     FUNCTIONS=$(declare -f wait_for_database create_schema seed_reference_data bootstrap_database)

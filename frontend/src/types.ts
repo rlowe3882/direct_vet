@@ -3,6 +3,37 @@ export interface StateOption {
   state: string;
 }
 
+export interface ClientAdminSummary {
+  client_id: number;
+  email: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  hospital_name: string;
+  address: string;
+  city: string;
+  state: string;
+  zip?: string | null;
+  is_employee: boolean;
+}
+
+export interface ClientDocumentSummary {
+  document_id: number;
+  hospital_id: number;
+  hospital_name: string;
+  file_name: string;
+  file_date: string;
+  assigned_at: string;
+  download_url: string;
+}
+
+export interface EmployeeAccountStatus {
+  client_id: number;
+  email: string;
+  is_employee: boolean;
+  created_at?: string | null;
+}
+
 export type PaymentType = "checking" | "credit_card";
 
 export interface RegistrationPayload {

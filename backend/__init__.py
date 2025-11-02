@@ -1,4 +1,3 @@
 """
-Backend package root for the PetLabs FastAPI application.
+Backend package root for the DirectVet laboratory document application serving clients like PetLabs.
 """
-

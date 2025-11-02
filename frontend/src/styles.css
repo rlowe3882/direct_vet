@@ -132,6 +132,8 @@ a {
 
 .view-toggle {
   display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 0.75rem;
   background: rgba(15, 31, 61, 0.6);
@@ -843,6 +845,25 @@ button:disabled {
   color: #1d4ed8;
   font-weight: 600;
   text-decoration: none;
+}
+
+.staff-documents__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.staff-documents__controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
+.staff-documents__controls select {
+  min-width: 16rem;
+  max-width: 20rem;
 }
 
 .staff-results__actions a:hover {

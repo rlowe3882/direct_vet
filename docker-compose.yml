@@ -37,10 +37,8 @@ services:
     # It must run the full setup sequence (wait_for_database, create_schema, seed_reference_data).
     # NOTE: Assuming your docker-entrypoint.sh can be run with arguments,
     # or you have a standalone script to run the setup. For simplicity, we run the steps directly.
-    command: >
-      /bin/sh -c "
-      ./docker-entrypoint.sh bootstrap_database # Assuming this runs only the setup part
-      "
+    command:
+      - bootstrap_database
     # Set to 'no' so the service exits after success and doesn't try to run Uvicorn.
     restart: "no"
   

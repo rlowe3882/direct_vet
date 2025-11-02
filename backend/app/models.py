@@ -10,6 +10,8 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.orm import relationship
+
 from .database import Base
 
 
@@ -47,6 +49,12 @@ class Client(Base):
     lname = Column(String(64), nullable=False)
     date = Column(Date, default=date.today, nullable=False)
     isActive = Column(Boolean, default=True, nullable=False)
+    employee_account = relationship(
+        "EmployeeAccount",
+        back_populates="client",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class Registration(Base):
@@ -77,3 +85,13 @@ class Document(Base):
     is_read = Column("isRead", Boolean, default=False, nullable=False)
     hospital_id = Column("HospitalId", Integer, ForeignKey("hospital.hospital_id"), nullable=False)
     create_date = Column("CreateDate", DateTime, default=datetime.utcnow, nullable=False)
+
+
+class EmployeeAccount(Base):
+    __tablename__ = "employee_account"
+
+    client_id = Column(Integer, ForeignKey("client.client_id"), primary_key=True)
+    email = Column(String(128), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    client = relationship("Client", back_populates="employee_account")

@@ -1,5 +1,8 @@
 import {
   DocumentUploadResponse,
+  ClientAdminSummary,
+  ClientDocumentSummary,
+  EmployeeAccountStatus,
   HospitalOption,
   LoginPayload,
   LoginResponse,
@@ -139,4 +142,87 @@ export async function uploadDocuments(
   }
 
   return response.json() as Promise<DocumentUploadResponse>;
+}
+
+export async function fetchAdminClients(token: string): Promise<ClientAdminSummary[]> {
+  const response = await fetch(`${API_BASE}/admin/clients`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message = (errorBody && errorBody.detail) || "Unable to load clients.";
+    const error = new Error(message) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+
+  return response.json() as Promise<ClientAdminSummary[]>;
+}
+
+export async function fetchClientDocuments(
+  token: string,
+  clientId: number,
+): Promise<ClientDocumentSummary[]> {
+  const response = await fetch(`${API_BASE}/admin/clients/${clientId}/documents`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message = (errorBody && errorBody.detail) || "Unable to load client documents.";
+    const error = new Error(message) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+
+  return response.json() as Promise<ClientDocumentSummary[]>;
+}
+
+export async function grantEmployeeAccess(
+  token: string,
+  clientId: number,
+): Promise<EmployeeAccountStatus> {
+  const response = await fetch(`${API_BASE}/admin/clients/${clientId}/employee`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message = (errorBody && errorBody.detail) || "Unable to grant employee access.";
+    const error = new Error(message) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+
+  return response.json() as Promise<EmployeeAccountStatus>;
+}
+
+export async function revokeEmployeeAccess(
+  token: string,
+  clientId: number,
+): Promise<EmployeeAccountStatus> {
+  const response = await fetch(`${API_BASE}/admin/clients/${clientId}/employee`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    const message = (errorBody && errorBody.detail) || "Unable to revoke employee access.";
+    const error = new Error(message) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+
+  return response.json() as Promise<EmployeeAccountStatus>;
 }
